@@ -43,18 +43,37 @@ jobs:
       - name: 启动 mock-gateway 后台
         shell: pwsh
         run: |
-          # 用 Node 启动 mock-gateway（Pester 依赖它做往返）
-          Start-Job -Name gateway -ScriptBlock {
-            Set-Location $env:GITHUB_WORKSPACE
-            node validation/mock-gateway.mjs 8420
-          } | Out-Null
-          Start-Sleep -Seconds 2
-          # 健康检查
-          try {
-            $h = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:8420/__echo" -Method POST -Body '{"text":"ping"}' -ContentType "application/json; charset=utf-8"
-            Write-Host "gateway up: $($h.StatusCode)"
-          } catch {
-            Write-Error "mock-gateway 未就绪: $_"
+          # 用 Node 启动 mock-gateway（Pester 依赖它做往返）。
+          # 用 Start-Process 启动真正的独立后台进程（Start-Job 创建的 PS 后台 job 在
+          # Windows runner 上不可靠，曾出现 node 根本未绑定端口就超时的情况）。
+          $gwLog = Join-Path $env:RUNNER_TEMP "mock-gateway.log"
+          $proc = Start-Process -FilePath "node" `
+            -ArgumentList "validation/mock-gateway.mjs","8420" `
+            -WorkingDirectory $env:GITHUB_WORKSPACE `
+            -WindowStyle Hidden -PassThru `
+            -RedirectStandardOutput $gwLog `
+            -RedirectStandardError "$gwLog.err"
+          # 记录 PID 到 GITHUB_ENV，供后续停止步骤使用
+          "GATEWAY_PID=$($proc.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "gateway started, PID=$($proc.Id)"
+          # 重试轮询健康检查（最多 ~30s），等 node 绑定端口
+          $ready = $false
+          for ($i = 0; $i -lt 30; $i++) {
+            Start-Sleep -Milliseconds 1000
+            try {
+              $h = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:8420/__echo" `
+                -Method POST -Body '{"text":"ping"}' -ContentType "application/json; charset=utf-8" -TimeoutSec 3
+              Write-Host "gateway up: $($h.StatusCode) (after ${i}s)"
+              $ready = $true
+              break
+            } catch {
+              # 还没起来，继续轮询
+            }
+          }
+          if (-not $ready) {
+            Write-Host "--- mock-gateway stdout ---"; if (Test-Path $gwLog) { Get-Content $gwLog -ErrorAction SilentlyContinue }
+            Write-Host "--- mock-gateway stderr ---"; if (Test-Path "$gwLog.err") { Get-Content "$gwLog.err" -ErrorAction SilentlyContinue }
+            Write-Error "mock-gateway 启动后 30s 仍未就绪"
             exit 1
           }
       - name: 运行 Pester 测试
@@ -68,4 +87,9 @@ jobs:
       - name: 停止 mock-gateway
         if: always()
         shell: pwsh
-        run: Stop-Job -Name gateway -ErrorAction SilentlyContinue; Remove-Job -Name gateway -ErrorAction SilentlyContinue
+        run: |
+          # 按 PID 停止 Start-Process 启动的 node 进程
+          if ($env:GATEWAY_PID) {
+            Stop-Process -Id $env:GATEWAY_PID -Force -ErrorAction SilentlyContinue
+            Write-Host "stopped gateway PID=$env:GATEWAY_PID"
+          }
