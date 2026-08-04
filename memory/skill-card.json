@@ -1,0 +1,65 @@
+{
+  "name": "windows-nonascii-http-utf8",
+  "version": "2.0.0",
+  "_meta": {
+    "role": "SESA Skill Card —— 把一次失败的搜索/HTTP 轨迹蒸馏为结构化、可检索、可演化的记忆单元。",
+    "fields_from_paper": "category/pattern/distinction/triggers/query_templates 对应 SESA 的 Skill Card；admission/eviction 对应其技能库准入去重与淘汰策略。"
+  },
+  "category": "encoding/http-transport",
+  "pattern": "Windows 客户端发送含非-ASCII（中文/西里尔/希腊/emoji/符号）的 JSON HTTP 载荷时，字节被非 UTF-8 编码序列化，导致接收端出现 '?' (0x3F) 静默替换。",
+  "distinction": "与「服务端编码错误」「数据库字符集错误」的区别：本卡只管「客户端序列化字节」这一段。判据是端到端 UTF-8 往返——发送方与回显/存储的文本必须逐字符相等，原文非-ASCII 处不得出现 '?'。",
+  "triggers": [
+    "存进去变成 ???? 乱码",
+    "L1 记忆提取为 0 条 / LLM 抽取失败",
+    "BM25 命中但内容是乱码",
+    "中文/日韩/emoji 在 API 请求中丢失",
+    "PowerShell Invoke-RestMethod 中文乱码",
+    "Windows 下发送非-ASCII 的 HTTP/JSON 请求"
+  ],
+  "diagnostic_signature": {
+    "proof_obligation_localization": "HTTP 请求体的字节序列化阶段（客户端侧，传输前）",
+    "verification_responsibility": "保证非-ASCII 载荷端到端 UTF-8 无损往返（去示例化：不绑定特定人物/项目文本）",
+    "skill_failure_mechanism": "PS5.1 Invoke-RestMethod 用 Windows-1252/GBK 序列化，多字节字符被不可逆替换为 0x3F；数据在网络传输前已丢失，无任何报错"
+  },
+  "query_templates": [
+    "windows powershell 中文 乱码 ???? invoke-restmethod",
+    "http 请求 非 ascii 编码 丢失 utf-8",
+    "agent memory 中文 存储 乱码 提取 0",
+    "emoji 西里尔 json 请求 替换 问号"
+  ],
+  "fix_templates": {
+    "node": {
+      "when": "可在脚本/服务侧用 Node.js（推荐，原生 UTF-8）",
+      "use": "scripts/encoding-safe-http.mjs 的 postJson/capture/search*/recall/roundTrip"
+    },
+    "pwsh5": {
+      "when": "必须留在 Windows PowerShell 5.1",
+      "use": "scripts/Send-Utf8Request.ps1 的 Send-Utf8RestMethod（内部走 [System.Text.Encoding]::UTF8.GetBytes 字节数组）"
+    },
+    "pwsh7": {
+      "when": "可升级到 PowerShell 7+",
+      "use": "原生 Invoke-RestMethod 已是 UTF-8；Send-Utf8RestMethod 会自动走原生路径"
+    }
+  },
+  "admission": {
+    "_doc": "对应 SESA：新 lesson/技能卡与现有条目的最大余弦相似度超过阈值即视为重复，不重复准入。",
+    "dedup_similarity_threshold": 0.93,
+    "note": "本领域 lesson 多围绕同一根因（客户端序列化非 UTF-8）；新增 corpus 用例优先复用同一技能卡，仅当出现新的诊断签名（如 Content-Length 字节计算、分块传输）才新建条目。"
+  },
+  "eviction": {
+    "_doc": "对应 SESA：非种子技能在若干次检索后若 净帮助分(hurt - hurt) 为负则驱逐；容量超限时按 LRU 淘汰最低分。",
+    "min_retrievals": 3,
+    "policy": "helpful - hurt < 0 => evict",
+    "capacity": 800,
+    "strategy": "LRU"
+  },
+  "frontier_shaping": {
+    "_doc": "对应 SESA 的钟形难度奖励：语料应覆盖能力边界，既不全是 ASCII（太简单）也不引入网关无法处理的非法负载（无解）。",
+    "tiers": ["t0-ascii", "t1-cjk", "t2-cyrillic-greek", "t3-emoji-symbol", "t4-mixed-long"]
+  },
+  "validation_gate": {
+    "command": "node validation/verify.mjs",
+    "pass_condition": "exit 0 == 全部 corpus 用例通过 UTF-8 往返断言 且 反向归因符合预期",
+    "last_result": "9/9 PASS, ACCEPT v2 (exit 0)"
+  }
+}
