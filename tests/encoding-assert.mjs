@@ -82,8 +82,9 @@ import { pathToFileURL } from "node:url";
 
 // 直接运行：对一个 (sent, received) 对做断言（便于手工复现）
 //   node tests/encoding-assert.mjs "你好" "你好"
-// 跨平台入口判定（Windows 上 process.argv[1] 带驱动器号，需经 pathToFileURL 归一化）
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+// 跨平台入口判定（Windows 上 process.argv[1] 带驱动器号，需经 pathToFileURL 归一化）；
+// process.argv[1] 在 --input-type=module -e 等场景下可能为 undefined，此时跳过。
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [sent, received] = process.argv.slice(2);
   if (!sent) {
     console.error("用法: node tests/encoding-assert.mjs <sent> [received]");

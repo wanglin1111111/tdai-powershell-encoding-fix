@@ -1,0 +1,11 @@
+# Pester / 测试产物
+tests/_*.xml
+tests/pester-result.xml
+*.Tests.xml
+
+# Node
+node_modules/
+npm-debug.log*
+
+# 本地临时
+*.tmp

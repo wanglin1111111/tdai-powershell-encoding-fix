@@ -1,0 +1,71 @@
+# 可执行验证门槛的强制门禁（对应 VeriSkill Stage3 的自动化准入）。
+# 每次 push / PR 自动跑离线验证门槛；不通过（exit 1）则阻断合并。
+# Windows runner 额外跑 PowerShell Pester 测试，覆盖 PS5.1 路径。
+
+name: verify
+
+on:
+  push:
+    branches: [master, "feat/**"]
+  pull_request:
+    branches: [master]
+
+jobs:
+  verify-node:
+    name: 验证门槛 (Node, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+      - name: 运行可执行验证门槛（VeriSkill Stage3）
+        run: node validation/verify.mjs
+
+  verify-powershell:
+    name: PowerShell Pester (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Pester（若不存在）
+        shell: pwsh
+        run: |
+          if (-not (Get-Module -ListAvailable Pester)) {
+            Install-Module Pester -MinimumVersion 5.0 -Force -Scope CurrentUser -SkipPublisherCheck
+          }
+          Import-Module Pester
+          $pester = (Get-Module -ListAvailable Pester | Select-Object -First 1).Version.ToString()
+          Write-Host "Pester version: $pester"
+      - name: 启动 mock-gateway 后台
+        shell: pwsh
+        run: |
+          # 用 Node 启动 mock-gateway（Pester 依赖它做往返）
+          Start-Job -Name gateway -ScriptBlock {
+            Set-Location $env:GITHUB_WORKSPACE
+            node validation/mock-gateway.mjs 8420
+          } | Out-Null
+          Start-Sleep -Seconds 2
+          # 健康检查
+          try {
+            $h = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:8420/__echo" -Method POST -Body '{"text":"ping"}' -ContentType "application/json; charset=utf-8"
+            Write-Host "gateway up: $($h.StatusCode)"
+          } catch {
+            Write-Error "mock-gateway 未就绪: $_"
+            exit 1
+          }
+      - name: 运行 Pester 测试
+        shell: pwsh
+        run: |
+          Set-Location $env:GITHUB_WORKSPACE
+          $cfg = New-PesterConfiguration
+          $cfg.Output.Verbosity = 'Detailed'
+          $cfg.Should.ErrorAction = 'Continue'
+          Invoke-Pester -Configuration $cfg
+      - name: 停止 mock-gateway
+        if: always()
+        shell: pwsh
+        run: Stop-Job -Name gateway -ErrorAction SilentlyContinue; Remove-Job -Name gateway -ErrorAction SilentlyContinue

@@ -1,6 +1,6 @@
 {
   "name": "windows-nonascii-http-utf8",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "_meta": {
     "role": "SESA Skill Card —— 把一次失败的搜索/HTTP 轨迹蒸馏为结构化、可检索、可演化的记忆单元。",
     "fields_from_paper": "category/pattern/distinction/triggers/query_templates 对应 SESA 的 Skill Card；admission/eviction 对应其技能库准入去重与淘汰策略。"
@@ -55,11 +55,16 @@
   },
   "frontier_shaping": {
     "_doc": "对应 SESA 的钟形难度奖励：语料应覆盖能力边界，既不全是 ASCII（太简单）也不引入网关无法处理的非法负载（无解）。",
-    "tiers": ["t0-ascii", "t1-cjk", "t2-cyrillic-greek", "t3-emoji-symbol", "t4-mixed-long"]
+    "tiers": ["t0-ascii", "t1-cjk", "t2-cyrillic-greek", "t3-emoji-symbol", "t4-mixed-long", "t5-rtl-zerowidth-zwj"]
   },
   "validation_gate": {
     "command": "node validation/verify.mjs",
     "pass_condition": "exit 0 == 全部 corpus 用例通过 UTF-8 往返断言 且 反向归因符合预期",
-    "last_result": "9/9 PASS, ACCEPT v2 (exit 0)"
+    "last_result": "14/14 PASS + Pester 10/10 PASS, ACCEPT v2.1 (exit 0)",
+    "ci": ".github/workflows/verify.yml (Node 双平台 + Windows Pester, push/PR 自动门禁)"
+  },
+  "lessons": {
+    "_doc": "v2.1 新增的真实知识缺口 lesson（部署侧，非 HTTP body）",
+    "ps_script_file_encoding": "PS5.1 无 BOM 时按 GBK 读取含非-ASCII 的 .ps1 脚本，中文直接损坏。含中文的 .ps1 必须保存为 UTF-8 with BOM。本仓库 scripts/Send-Utf8Request.ps1 与 tests/*.Tests.ps1 均已加 BOM。PS7+/Node 不受影响。"
   }
 }

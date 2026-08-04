@@ -142,7 +142,9 @@ export function startMockGateway({ port = 0, host = "127.0.0.1" } = {}) {
 }
 
 // 直接运行：node validation/mock-gateway.mjs [port]
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+// 注意：当被以 --input-type=module -e 等方式加载时 process.argv[1] 可能为 undefined，
+// 此时跳过 CLI 入口（仅作为模块被 import），避免 pathToFileURL 崩溃。
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const port = Number(process.argv[2] || 8420);
   const { url } = await startMockGateway({ port, host: "127.0.0.1" });
   console.log(`[mock-gateway] listening on ${url}  (Ctrl+C 退出)`);

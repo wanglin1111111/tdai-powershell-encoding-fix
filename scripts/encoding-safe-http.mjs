@@ -100,7 +100,8 @@ export async function roundTrip(base, text, { echoPath = "/__echo", field = "tex
 // ---- 自检：被 import 时可直接运行 ----
 // 用法：node scripts/encoding-safe-http.mjs <base>
 import { pathToFileURL } from "node:url";
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+// process.argv[1] 在 --input-type=module -e 等场景下可能为 undefined，此时跳过 CLI 入口
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const base = process.argv[2] || "http://127.0.0.1:8420";
   const sample = "我叫张明，全栈工程师，技术栈：TypeScript + React + Node.js ✓ 🚀";
   console.log(`[encoding-safe-http] round-trip self-check against ${base}`);

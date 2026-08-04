@@ -1,4 +1,4 @@
-# Send-Utf8Request.ps1
+﻿# Send-Utf8Request.ps1
 # Windows PowerShell 下的 UTF-8 安全 HTTP 封装。
 #
 # 设计动机：PowerShell 5.1（Windows 默认）的 Invoke-RestMethod 在把字符串

@@ -42,6 +42,15 @@
    - 在 `corpus.json` 加一条能稳定复现的用例
    - 跑 `verify.mjs`，直到该用例通过且不影响其它用例（语义保持），才准入。
 
+5. **失效发生在「PowerShell 读取脚本/文件本身」而非「发送 HTTP」？**
+   （典型表现：`.ps1` 里的中文在被 PS5.1 解析时已变成乱码，报「哈希文本不完整」
+   等解析错误。）→ **④ 知识缺口（脚本文件编码，非 HTTP body 编码）**。
+   这是 PS5.1 编码问题的**另一个面**：它不只影响 `Invoke-RestMethod`，还影响**读取
+   含非-ASCII 的脚本文件**。PS5.1 无 BOM 时按系统编码（GBK）读取脚本，中文直接损坏。
+   应对：给 `.ps1` 文件保存为 **UTF-8 with BOM**——PS5.1 见到 BOM 才按 UTF-8 解析。
+   本仓库的 `scripts/Send-Utf8Request.ps1` 与 `tests/*.Tests.ps1` 均已加 BOM。
+   （PS7+ / Node 无此问题，BOM 不影响它们。）
+
 ## 反向验证（避免误归因）
 
 每次归因为「② 工具限制」时，建议同时用 **坏客户端**（`verify.mjs` 的 latin1 路径）

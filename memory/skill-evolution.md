@@ -89,6 +89,44 @@ $ node validation/verify.mjs
 
 ---
 
+## v2.1 —— 第二轮演化（能力边界扩展 + 部署健壮性 + CI 门禁）
+
+v2 准入后，按「后续演化守则」再跑了一轮 Pose→Solve→Remember，产出 v2.1：
+
+**① 能力边界扩展（frontier shaping）**：把 corpus 从 9 条扩到 14 条，新增 t5 tier（能力边界）：
+- RTL 脚本（阿拉伯文、希伯来文）——验证方向性字符不损坏
+- 泰文（无词间空格，易被错误截断）
+- 零宽字符（U+200B/U+200D）与组合字符（U+0308）——往返须逐字符相等
+- ZWJ emoji 序列、肤色修饰符、国旗码点（多码点单字形，最易被拆分）
+
+**② 部署健壮性 lesson（真实发现的 ④ 知识缺口）**：编写 PowerShell Pester 测试时触发了一个
+**新的诊断签名**——失效不在「发送 HTTP」，而在「PS5.1 读取含中文的 `.ps1` 脚本」。
+无 BOM 时 PS5.1 按 GBK 读取脚本，中文直接变乱码导致解析失败。这是 PS5.1 编码问题的
+**另一个面**（与 `Invoke-RestMethod` 的 body 序列化是不同根因，但同属「PS5.1 非 UTF-8」）。
+- **lesson**：含非-ASCII 的 `.ps1` 必须保存为 **UTF-8 with BOM**。
+- **落地**：`scripts/Send-Utf8Request.ps1`、`tests/*.Tests.ps1` 均加 BOM；归因分类法新增
+  第 5 项检查（见 `attribution-taxonomy.md`）。
+
+**③ CI 强制门禁**：新增 `.github/workflows/verify.yml`，把 Stage3 的「可执行验证」从手动
+升级为 push/PR 自动门禁（Node 侧 `verify.mjs` 双平台 + Windows 侧 Pester）。对应 VeriSkill
+「只有通过验证才准入」的自动化。
+
+**④ PowerShell 自有验证**：新增 `tests/Send-Utf8Request.Tests.ps1`（Pester，版本自适应 3.x/5）。
+此前只有 Node 侧有 `verify.mjs`，PS 侧缺独立验证；现在 PS5.1 字节数组路径与 PS7+ 原生路径
+都有断言覆盖。
+
+**验证准入（v2.1）**：
+```
+node validation/verify.mjs      → 14/14 (100.0%)，反向归因 13/13，ACCEPT v2.1 (exit 0)
+Invoke-Pester tests/Send-Utf8Request.Tests.ps1（PS5.1 + Pester 3.4）
+                                → 10/10 PASS（含中文/西里尔/emoji/拉丁扩展往返 + '?'替换检测）
+```
+PS7+ 路径本机无法验证（无 pwsh），由 CI 的 windows-latest 覆盖。
+
+**准入决策**：`Ĵ_V(v2.1)=14/14 > Ĵ_V(v2)=9/9`，语义保持，新增 PS 侧独立验证 ⇒ **ACCEPT v2.1**。
+
+---
+
 ## 后续演化守则（对应 SESA Remember / VeriSkill 演化循环）
 
 当再次遇到编码失效时，按此闭环处理：

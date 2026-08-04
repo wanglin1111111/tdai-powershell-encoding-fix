@@ -1,15 +1,7 @@
 ---
 name: windows-nonascii-http-utf8
-version: 2.0.0
-description: >-
-  保证 Windows 下含非-ASCII 字符（中文、日韩文、西里尔/希腊、emoji、数学符号等）的
-  HTTP/JSON 载荷端到端 UTF-8 无损往返。当遇到这些情况时使用：发送中文后「存进去变成
-  ???? 乱码」「LLM/Agent Memory 记忆提取为 0 条」「BM25 命中但内容是乱码」「PowerShell
-  Invoke-RestMethod/WebRequest 中文丢失」「在 Windows 上调用需要非-ASCII 输入的 REST API
-  （各类 LLM API、腾讯云 Agent Memory /capture /search /recall）时字符被替换成问号」。
-  提供可复用的 UTF-8 安全 HTTP 客户端（Node）、PowerShell 字节封装（PS5.1/7+）、离线
-  可执行验证门槛与失败归因分类法。不负责：纯 ASCII 请求、服务端/数据库字符集问题、
-  非编码类网络故障。
+version: 2.1.0
+description: "保证 Windows 下含非-ASCII 字符（中文、日韩文、西里尔/希腊、emoji、数学符号等）的 HTTP/JSON 载荷端到端 UTF-8 无损往返。当遇到这些情况时使用：发送中文后「存进去变成 ???? 乱码」「LLM/Agent Memory 记忆提取为 0 条」「BM25 命中但内容是乱码」「PowerShell Invoke-RestMethod/WebRequest 中文丢失」「在 Windows 上调用需要非-ASCII 输入的 REST API（各类 LLM API、腾讯云 Agent Memory /capture /search /recall）时字符被替换成问号」。提供可复用的 UTF-8 安全 HTTP 客户端（Node）、PowerShell 字节封装（PS5.1/7+）、离线可执行验证门槛与失败归因分类法。不负责：纯 ASCII 请求、服务端/数据库字符集问题、非编码类网络故障。"
 ---
 
 # Windows 非-ASCII HTTP 编码安全技能
