@@ -22,16 +22,16 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$HelpersPath = Join-Path $PSScriptRoot "test-helpers.ps1"
-
 # 仅取 $Cases 用于 discovery 阶段的 foreach（Pester 5 顶层变量在 Describe discovery 可见）
-. $HelpersPath
+. (Join-Path $PSScriptRoot "test-helpers.ps1")
 $DiscoveryCases = $Cases
 
 Describe "Send-Utf8RestMethod 端到端 UTF-8 往返" -Tag "E2E" {
-    # 在 BeforeAll 内 dot-source：函数进入本 Describe 的 runspace 作用域，It 块可见
+    # 在 BeforeAll 内 dot-source：函数进入本 Describe 的 runspace 作用域，It 块可见。
+    # 注意：BeforeAll 在独立 runspace，文件顶层变量（如 $HelpersPath）不可见，必须用
+    # $PSScriptRoot 现场拼路径（Pester 5 的 BeforeAll 里 $PSScriptRoot 指向测试文件目录）。
     BeforeAll {
-        . $HelpersPath
+        . (Join-Path $PSScriptRoot "test-helpers.ps1")
     }
 
     foreach ($c in $DiscoveryCases) {
@@ -63,7 +63,7 @@ Describe "Send-Utf8RestMethod 端到端 UTF-8 往返" -Tag "E2E" {
 }
 
 Describe "Content-Type 头强制 UTF-8" -Tag "Unit" {
-    BeforeAll { . $HelpersPath }
+    BeforeAll { . (Join-Path $PSScriptRoot "test-helpers.ps1") }
     It "Send-Utf8RestMethod 内部使用 charset=utf-8" {
         $src = Get-Content (Join-Path $SkillRoot "scripts\Send-Utf8Request.ps1") -Raw -Encoding UTF8
         Expect-Match $src "charset=utf-8"
@@ -71,7 +71,7 @@ Describe "Content-Type 头强制 UTF-8" -Tag "Unit" {
 }
 
 Describe "PS 版本路径分流" -Tag "Unit" {
-    BeforeAll { . $HelpersPath }
+    BeforeAll { . (Join-Path $PSScriptRoot "test-helpers.ps1") }
     It "在 PS5.1 上走字节数组路径（[System.Text.Encoding]::UTF8.GetBytes）" {
         $src = Get-Content (Join-Path $SkillRoot "scripts\Send-Utf8Request.ps1") -Raw -Encoding UTF8
         Expect-Match $src "\[System\.Text\.Encoding\]::UTF8\.GetBytes"
