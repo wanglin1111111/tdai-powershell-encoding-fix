@@ -1,0 +1,112 @@
+{
+  "_meta": {
+    "purpose": "VeriSkill Stage3 可执行验证语料 / SESA frontier shaping 难度分级。每条用例代表一个待编码安全处理的非-ASCII 往返任务；通过率即技能成功率 J(S) 的离线估计。",
+    "oracle": "对每条 text 走 roundTrip 后，received 必须与 sent 逐字符相等，且原文非-ASCII 处不得出现 0x3F(?) 替换。",
+    "tiers": {
+      "t0": "纯 ASCII 基线（不应被破坏）",
+      "t1": "中文（CJK 统一表意文字，最常见的失效场景）",
+      "t2": "西里尔 / 希腊（其它多字节脚本，验证修复不局限于 GBK）",
+      "t3": "emoji 与符号（4 字节 UTF-8，PS5.1 同样会替换成 ?）",
+      "t4": "混合 + 长文本（贴近真实多轮对话，压测能力边界）",
+      "t5": "能力边界（RTL 脚本 / 零宽 / 组合字符 / ZWJ emoji 序列 / 国旗码点）"
+    }
+  },
+  "cases": [
+    {
+      "id": "t0-ascii",
+      "tier": "t0",
+      "text": "My name is Zhang Ming, a full-stack engineer using TypeScript, React and Node.js.",
+      "expectUtf8": true,
+      "note": "基线：纯 ASCII 在任何编码下都不应损坏。"
+    },
+    {
+      "id": "t1-zh-intro",
+      "tier": "t1",
+      "text": "我叫张明，是一名全栈开发工程师，主要用 TypeScript 和 React 做前端，Node.js 做后端。",
+      "expectUtf8": true,
+      "note": "最经典失效场景：PS5.1 下中文变 ????。"
+    },
+    {
+      "id": "t1-zh-address",
+      "tier": "t1",
+      "text": "我住在中国武汉，平时周末喜欢去东湖绿道骑行。",
+      "expectUtf8": true
+    },
+    {
+      "id": "t2-cyrillic",
+      "tier": "t2",
+      "text": "Привет, меня зовут Дмитрий, я работаю с React и Node.js.",
+      "expectUtf8": true,
+      "note": "西里尔字母同样会被 0x3F 替换。"
+    },
+    {
+      "id": "t2-greek",
+      "tier": "t2",
+      "text": "Γεια σας, αυτό είναι ένα τεστ κωδικοποίησης UTF-8.",
+      "expectUtf8": true,
+      "note": "希腊字母。"
+    },
+    {
+      "id": "t3-emoji",
+      "tier": "t3",
+      "text": "部署完成 🚀 全绿 ✅ 性能提升 +20% 🎉 明天继续优化 ⚡",
+      "expectUtf8": true,
+      "note": "4 字节 UTF-8 emoji。"
+    },
+    {
+      "id": "t3-symbols",
+      "tier": "t3",
+      "text": "数学符号：π ≈ 3.14159，求和 Σ，不等号 ≠，箭头 ⇒ ✓",
+      "expectUtf8": true
+    },
+    {
+      "id": "t4-mixed-long",
+      "tier": "t4",
+      "text": "会议纪要：张明（Zhang Ming）汇报 Magic Resume 项目进度。前端用 TanStack Router 做类型安全路由，后端 Node.js + Express，CI 跑在 GitHub Actions 上。下个里程碑支持多模板切换 🎨，预计 2 周交付。团队反馈：「Очень хорошо（很好）！👏」 周末去东湖绿道骑行放松。",
+      "expectUtf8": true,
+      "note": "中-英-俄-emoji 混排的长文本，贴近真实多轮对话载荷。"
+    },
+    {
+      "id": "t4-json-special",
+      "tier": "t4",
+      "text": "引号 \" 与反斜杠 \\ 与换行必须保留：他说\"你好\\world\"，路径 C:\\Users\\张明",
+      "expectUtf8": true,
+      "note": "含需要 JSON 转义的字符，验证序列化与反序列化对称。"
+    },
+    {
+      "id": "t5-arabic",
+      "tier": "t5",
+      "text": "مرحبا، هذا اختبار للنص العربي مع اتجاه من اليمين إلى اليسار.",
+      "expectUtf8": true,
+      "note": "阿拉伯文 RTL 脚本，验证方向性字符不损坏。"
+    },
+    {
+      "id": "t5-hebrew",
+      "tier": "t5",
+      "text": "שלום, זהו מבחן של טקסט בעברית עם כיוון ימין לשמאל.",
+      "expectUtf8": true,
+      "note": "希伯来文 RTL 脚本。"
+    },
+    {
+      "id": "t5-thai",
+      "tier": "t5",
+      "text": "สวัสดีครับ นี่คือการทดสอบข้อความภาษาไทยที่ไม่มีช่องว่างระหว่างคำ",
+      "expectUtf8": true,
+      "note": "泰文（无词间空格，多字节组合），易被错误截断。"
+    },
+    {
+      "id": "t5-zerowidth",
+      "tier": "t5",
+      "text": "café\u200b（带零宽空格）与 résumé\u200d（带零宽连接符）与 na\u0308ıve（组合分音符）",
+      "expectUtf8": true,
+      "note": "零宽字符(U+200B/U+200D)与组合字符(U+0308)。往返必须逐字符相等，不得被剥离。"
+    },
+    {
+      "id": "t5-emoji-zwj",
+      "tier": "t5",
+      "text": "家庭 emoji：👨‍👩‍👧‍👦（ZWJ 序列，单字符簇）肤色：👋🏽👍🏾 肤色修饰符 国旗：🇨🇳🇯🇵",
+      "expectUtf8": true,
+      "note": "ZWJ emoji 序列、肤色修饰符、区域指示符，都是多码点单字形，最易在码点级被拆分。"
+    }
+  ]
+}

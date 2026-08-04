@@ -1,0 +1,88 @@
+# 可执行验证门槛的强制门禁（对应 VeriSkill Stage3 的自动化准入）。
+# 每次 push / PR 自动跑离线验证门槛；不通过（exit 1）则阻断合并。
+# Windows runner 额外跑 PowerShell Pester 测试，覆盖 PS5.1 路径。
+
+name: verify
+
+on:
+  push:
+    branches: [master, "feat/**"]
+  pull_request:
+    branches: [master]
+
+jobs:
+  verify-node:
+    name: 验证门槛 (Node, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+      - name: 运行可执行验证门槛（VeriSkill Stage3）
+        run: node validation/verify.mjs
+
+  verify-powershell:
+    name: PowerShell Pester (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Pester（若不存在）
+        shell: pwsh
+        run: |
+          if (-not (Get-Module -ListAvailable Pester)) {
+            Install-Module Pester -MinimumVersion 5.0 -Force -Scope CurrentUser -SkipPublisherCheck
+          }
+          Import-Module Pester
+          $pester = (Get-Module -ListAvailable Pester | Select-Object -First 1).Version.ToString()
+          Write-Host "Pester version: $pester"
+      - name: 启动 mock-gateway 并运行 Pester
+        shell: pwsh
+        run: |
+          Set-Location $env:GITHUB_WORKSPACE
+          # 关键：gateway 启动与 Pester 运行必须在同一个 step（同一 pwsh 会话）。
+          # GitHub Actions 每个 step 是独立 shell 进程；跨 step 时 Start-Process 启动的
+          # 后台 node 进程虽存活，但端口监听不稳定（Pester 步骤里 Test-GatewayReady 会偶发
+          # 返回 false）。合并为一步后，node 后台进程与本会话共存，Pester 期间始终可达。
+          $gwLog = Join-Path $env:RUNNER_TEMP "mock-gateway.log"
+          $proc = Start-Process -FilePath "node" `
+            -ArgumentList "validation/mock-gateway.mjs","8420" `
+            -WorkingDirectory $env:GITHUB_WORKSPACE `
+            -WindowStyle Hidden -PassThru `
+            -RedirectStandardOutput $gwLog `
+            -RedirectStandardError "$gwLog.err"
+          Write-Host "gateway started, PID=$($proc.Id)"
+          try {
+            # 重试轮询健康检查（最多 ~30s），等 node 绑定端口
+            $ready = $false
+            for ($i = 0; $i -lt 30; $i++) {
+              Start-Sleep -Milliseconds 1000
+              try {
+                $h = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:8420/__echo" `
+                  -Method POST -Body '{"text":"ping"}' -ContentType "application/json; charset=utf-8" -TimeoutSec 3
+                Write-Host "gateway up: $($h.StatusCode) (after ${i}s)"
+                $ready = $true
+                break
+              } catch { }
+            }
+            if (-not $ready) {
+              Write-Host "--- mock-gateway stdout ---"; if (Test-Path $gwLog) { Get-Content $gwLog -ErrorAction SilentlyContinue }
+              Write-Host "--- mock-gateway stderr ---"; if (Test-Path "$gwLog.err") { Get-Content "$gwLog.err" -ErrorAction SilentlyContinue }
+              throw "mock-gateway 启动后 30s 仍未就绪"
+            }
+            # 运行 Pester
+            $cfg = New-PesterConfiguration
+            $cfg.Output.Verbosity = 'Detailed'
+            $cfg.Should.ErrorAction = 'Continue'
+            $cfg.Run.Path = (Join-Path $env:GITHUB_WORKSPACE "tests")
+            $result = Invoke-Pester -Configuration $cfg
+            if ($result.FailedCount -gt 0) { throw "Pester 有 $($result.FailedCount) 个失败" }
+            Write-Host "Pester 全部通过: $($result.PassedCount) passed"
+          } finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            Write-Host "stopped gateway PID=$($proc.Id)"
+          }
