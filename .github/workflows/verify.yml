@@ -40,12 +40,14 @@ jobs:
           Import-Module Pester
           $pester = (Get-Module -ListAvailable Pester | Select-Object -First 1).Version.ToString()
           Write-Host "Pester version: $pester"
-      - name: 启动 mock-gateway 后台
+      - name: 启动 mock-gateway 并运行 Pester
         shell: pwsh
         run: |
-          # 用 Node 启动 mock-gateway（Pester 依赖它做往返）。
-          # 用 Start-Process 启动真正的独立后台进程（Start-Job 创建的 PS 后台 job 在
-          # Windows runner 上不可靠，曾出现 node 根本未绑定端口就超时的情况）。
+          Set-Location $env:GITHUB_WORKSPACE
+          # 关键：gateway 启动与 Pester 运行必须在同一个 step（同一 pwsh 会话）。
+          # GitHub Actions 每个 step 是独立 shell 进程；跨 step 时 Start-Process 启动的
+          # 后台 node 进程虽存活，但端口监听不稳定（Pester 步骤里 Test-GatewayReady 会偶发
+          # 返回 false）。合并为一步后，node 后台进程与本会话共存，Pester 期间始终可达。
           $gwLog = Join-Path $env:RUNNER_TEMP "mock-gateway.log"
           $proc = Start-Process -FilePath "node" `
             -ArgumentList "validation/mock-gateway.mjs","8420" `
@@ -53,43 +55,34 @@ jobs:
             -WindowStyle Hidden -PassThru `
             -RedirectStandardOutput $gwLog `
             -RedirectStandardError "$gwLog.err"
-          # 记录 PID 到 GITHUB_ENV，供后续停止步骤使用
-          "GATEWAY_PID=$($proc.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "gateway started, PID=$($proc.Id)"
-          # 重试轮询健康检查（最多 ~30s），等 node 绑定端口
-          $ready = $false
-          for ($i = 0; $i -lt 30; $i++) {
-            Start-Sleep -Milliseconds 1000
-            try {
-              $h = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:8420/__echo" `
-                -Method POST -Body '{"text":"ping"}' -ContentType "application/json; charset=utf-8" -TimeoutSec 3
-              Write-Host "gateway up: $($h.StatusCode) (after ${i}s)"
-              $ready = $true
-              break
-            } catch {
-              # 还没起来，继续轮询
+          try {
+            # 重试轮询健康检查（最多 ~30s），等 node 绑定端口
+            $ready = $false
+            for ($i = 0; $i -lt 30; $i++) {
+              Start-Sleep -Milliseconds 1000
+              try {
+                $h = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:8420/__echo" `
+                  -Method POST -Body '{"text":"ping"}' -ContentType "application/json; charset=utf-8" -TimeoutSec 3
+                Write-Host "gateway up: $($h.StatusCode) (after ${i}s)"
+                $ready = $true
+                break
+              } catch { }
             }
-          }
-          if (-not $ready) {
-            Write-Host "--- mock-gateway stdout ---"; if (Test-Path $gwLog) { Get-Content $gwLog -ErrorAction SilentlyContinue }
-            Write-Host "--- mock-gateway stderr ---"; if (Test-Path "$gwLog.err") { Get-Content "$gwLog.err" -ErrorAction SilentlyContinue }
-            Write-Error "mock-gateway 启动后 30s 仍未就绪"
-            exit 1
-          }
-      - name: 运行 Pester 测试
-        shell: pwsh
-        run: |
-          Set-Location $env:GITHUB_WORKSPACE
-          $cfg = New-PesterConfiguration
-          $cfg.Output.Verbosity = 'Detailed'
-          $cfg.Should.ErrorAction = 'Continue'
-          Invoke-Pester -Configuration $cfg
-      - name: 停止 mock-gateway
-        if: always()
-        shell: pwsh
-        run: |
-          # 按 PID 停止 Start-Process 启动的 node 进程
-          if ($env:GATEWAY_PID) {
-            Stop-Process -Id $env:GATEWAY_PID -Force -ErrorAction SilentlyContinue
-            Write-Host "stopped gateway PID=$env:GATEWAY_PID"
+            if (-not $ready) {
+              Write-Host "--- mock-gateway stdout ---"; if (Test-Path $gwLog) { Get-Content $gwLog -ErrorAction SilentlyContinue }
+              Write-Host "--- mock-gateway stderr ---"; if (Test-Path "$gwLog.err") { Get-Content "$gwLog.err" -ErrorAction SilentlyContinue }
+              throw "mock-gateway 启动后 30s 仍未就绪"
+            }
+            # 运行 Pester
+            $cfg = New-PesterConfiguration
+            $cfg.Output.Verbosity = 'Detailed'
+            $cfg.Should.ErrorAction = 'Continue'
+            $cfg.Run.Path = (Join-Path $env:GITHUB_WORKSPACE "tests")
+            $result = Invoke-Pester -Configuration $cfg
+            if ($result.FailedCount -gt 0) { throw "Pester 有 $($result.FailedCount) 个失败" }
+            Write-Host "Pester 全部通过: $($result.PassedCount) passed"
+          } finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            Write-Host "stopped gateway PID=$($proc.Id)"
           }
