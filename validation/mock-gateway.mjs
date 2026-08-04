@@ -129,13 +129,28 @@ export function startMockGateway({ port = 0, host = "127.0.0.1" } = {}) {
       }
     });
 
+    server.on("error", (err) => {
+      // 监听 server 错误，避免未捕获事件导致进程异常退出
+      console.error("[mock-gateway] server error:", err.message);
+    });
+
     server.listen(port, host, () => {
       const addr = server.address();
       const url = `http://${host}:${addr.port}`;
       resolve({
         server,
         url,
-        close: () => new Promise((r) => server.close(() => r())),
+        // 稳健关闭：先停止接受新连接，再关闭底层 server。
+        // 直接 server.close() 在 Windows 上偶发 libuv 断言（UV_HANDLE_CLOSING），
+        // 尤其是仍有 keep-alive 连接时。先 unref + closeAllConnections 更安全。
+        close: () =>
+          new Promise((r) => {
+            server.close(() => r());
+            // 兜底：若 closeAllConnections 可用（Node 18.2+），强制关闭闲置连接
+            if (typeof server.closeAllConnections === "function") {
+              try { server.closeAllConnections(); } catch {}
+            }
+          }),
       });
     });
   });

@@ -6,13 +6,14 @@
 #     Start-Job { node validation/mock-gateway.mjs 8420 } ; Start-Sleep 2
 #     Invoke-Pester tests/Send-Utf8Request.Tests.ps1
 #
-# 兼容性（关键）：
+# 兼容性（关键，踩坑总结）：
 #   - Windows PowerShell 5.1 + Pester 3.x（本机默认，legacy 'Should Be'）
 #   - PowerShell 7 + Pester 5（CI windows-latest，'Should -Be'，It 块在独立 runspace）
-#   Pester 5 的 It runspace 完全隔离：测试文件顶层 / script: 作用域定义的函数与变量在 It 块内
-#   都不可见（报 CommandNotFoundException）。唯一可靠的方式是把辅助逻辑放进独立 .ps1 文件并
-#   dot-source（dot-source 进来的函数在 It 块内可用，如同 Send-Utf8RestMethod）。故本文件
-#   dot-source tests/test-helpers.ps1。
+#   Pester 5 的 It runspace 完全隔离：文件顶层、script: 作用域、甚至顶层 dot-source 进来的
+#   函数，在 It 块内都不可见（CI 反复验证：均报 CommandNotFoundException）。
+#   唯一可靠的方式：在 **BeforeAll 块内** dot-source 辅助文件——BeforeAll 的内容会在该 Describe
+#   的 runspace 作用域里执行，定义的函数对同 Describe 的 It 块可见（Pester 5 官方模式，
+#   Pester 3.x 同样支持 BeforeAll）。
 #
 # 注意：本文件与 test-helpers.ps1 都必须以 UTF-8 with BOM 保存——否则 Windows PowerShell 5.1
 # 会用系统编码（GBK）读取脚本，中文变乱码导致解析失败。
@@ -21,13 +22,19 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-# dot-source 共享辅助逻辑（函数/变量/Pester 版本标志/语料）。Pester 5 的 It 块能访问这些函数。
-. (Join-Path $PSScriptRoot "test-helpers.ps1")
+$HelpersPath = Join-Path $PSScriptRoot "test-helpers.ps1"
+
+# 仅取 $Cases 用于 discovery 阶段的 foreach（Pester 5 顶层变量在 Describe discovery 可见）
+. $HelpersPath
+$DiscoveryCases = $Cases
 
 Describe "Send-Utf8RestMethod 端到端 UTF-8 往返" -Tag "E2E" {
+    # 在 BeforeAll 内 dot-source：函数进入本 Describe 的 runspace 作用域，It 块可见
+    BeforeAll {
+        . $HelpersPath
+    }
 
-    # $Cases 在 discovery 阶段可见（Pester 5 顶层 dot-source 变量在 Describe 作用域可用）
-    foreach ($c in $Cases) {
+    foreach ($c in $DiscoveryCases) {
         $label = $c.Text.Substring(0, [Math]::Min(20, $c.Text.Length))
         It "往返无损: [$($c.Id)] $label..." {
             if (-not (Test-GatewayReady)) {
@@ -56,6 +63,7 @@ Describe "Send-Utf8RestMethod 端到端 UTF-8 往返" -Tag "E2E" {
 }
 
 Describe "Content-Type 头强制 UTF-8" -Tag "Unit" {
+    BeforeAll { . $HelpersPath }
     It "Send-Utf8RestMethod 内部使用 charset=utf-8" {
         $src = Get-Content (Join-Path $SkillRoot "scripts\Send-Utf8Request.ps1") -Raw -Encoding UTF8
         Expect-Match $src "charset=utf-8"
@@ -63,6 +71,7 @@ Describe "Content-Type 头强制 UTF-8" -Tag "Unit" {
 }
 
 Describe "PS 版本路径分流" -Tag "Unit" {
+    BeforeAll { . $HelpersPath }
     It "在 PS5.1 上走字节数组路径（[System.Text.Encoding]::UTF8.GetBytes）" {
         $src = Get-Content (Join-Path $SkillRoot "scripts\Send-Utf8Request.ps1") -Raw -Encoding UTF8
         Expect-Match $src "\[System\.Text\.Encoding\]::UTF8\.GetBytes"
